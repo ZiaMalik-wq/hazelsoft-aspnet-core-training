@@ -1,56 +1,54 @@
 using AutoMapper;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using UserManagement.Api.Dtos;
 using UserManagement.Api.Models;
 
 namespace UserManagement.Api.Services
 {
     /// <summary>
-    /// Implements User business logic. Currently backed by an in-memory list;
-    /// will be replaced with EF Core persistence in Week 3.
+    /// Implements User business logic, backed by the ASP.NET Core Identity UserManager.
     /// </summary>
-    public class UserService : IUserService
+    public class UserService(UserManager<User> userManager, IMapper mapper) : IUserService
     {
-        // In-memory "database" for now.
-        private static readonly List<User> _users =
-        [
-            new User { Id = 1, FirstName = "Ali", LastName = "Khan", Email = "ali.khan@example.com" },
-            new User { Id = 2, FirstName = "Sara", LastName = "Ahmed", Email = "sara.ahmed@example.com" },
-            new User { Id = 3, FirstName = "Bilal", LastName = "Hassan", Email = "bilal.hassan@example.com" }
-        ];
+        private readonly UserManager<User> _userManager = userManager;
+        private readonly IMapper _mapper = mapper;
 
-        private static int _nextId = 4;
-
-        private readonly IMapper _mapper;
-
-        public UserService(IMapper mapper)
+        public async Task<IEnumerable<UserDto>> GetAllUsersAsync()
         {
-            _mapper = mapper;
+            var users = await _userManager.Users.ToListAsync();
+            return _mapper.Map<IEnumerable<UserDto>>(users);
         }
 
-        public IEnumerable<UserDto> GetAllUsers()
+        public async Task<UserDto?> GetUserByIdAsync(int id)
         {
-            return _mapper.Map<IEnumerable<UserDto>>(_users);
-        }
-
-        public UserDto? GetUserById(int id)
-        {
-            var user = _users.FirstOrDefault(u => u.Id == id);
+            var user = await _userManager.FindByIdAsync(id.ToString());
             return user is null ? null : _mapper.Map<UserDto>(user);
         }
 
-        public UserDto CreateUser(CreateUserDto createUserDto)
+        public async Task<UserDto> CreateUserAsync(CreateUserDto createUserDto)
         {
-            var newUser = _mapper.Map<User>(createUserDto);
-            newUser.Id = _nextId++; // server-generated id
+            var newUser = new User
+            {
+                FirstName = createUserDto.FirstName,
+                LastName = createUserDto.LastName,
+                Email = createUserDto.Email,
+                UserName = createUserDto.Email // Set UserName to Email for Identity framework
+            };
 
-            _users.Add(newUser);
+            var result = await _userManager.CreateAsync(newUser, createUserDto.Password);
+            if (!result.Succeeded)
+            {
+                var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+                throw new InvalidOperationException($"User creation failed: {errors}");
+            }
 
             return _mapper.Map<UserDto>(newUser);
         }
 
-        public bool UpdateUser(int id, UpdateUserDto updateUserDto)
+        public async Task<bool> UpdateUserAsync(int id, UpdateUserDto updateUserDto)
         {
-            var existingUser = _users.FirstOrDefault(u => u.Id == id);
+            var existingUser = await _userManager.FindByIdAsync(id.ToString());
 
             if (existingUser is null)
             {
@@ -60,21 +58,23 @@ namespace UserManagement.Api.Services
             existingUser.FirstName = updateUserDto.FirstName;
             existingUser.LastName = updateUserDto.LastName;
             existingUser.Email = updateUserDto.Email;
+            existingUser.UserName = updateUserDto.Email; // Keep UserName in sync with Email
 
-            return true;
+            var result = await _userManager.UpdateAsync(existingUser);
+            return result.Succeeded;
         }
 
-        public bool DeleteUser(int id)
+        public async Task<bool> DeleteUserAsync(int id)
         {
-            var existingUser = _users.FirstOrDefault(u => u.Id == id);
+            var existingUser = await _userManager.FindByIdAsync(id.ToString());
 
             if (existingUser is null)
             {
                 return false;
             }
 
-            _users.Remove(existingUser);
-            return true;
+            var result = await _userManager.DeleteAsync(existingUser);
+            return result.Succeeded;
         }
     }
 }
